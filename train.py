@@ -101,9 +101,10 @@ def _run_epoch_clf(model, loader, criterion, optimizer, device, train=True, desc
     model.train() if train else model.eval()
     total_loss, correct, total = 0.0, 0, 0
     ctx = torch.enable_grad() if train else torch.no_grad()
-    bar = tqdm(loader, desc=desc, leave=False, unit="batch", mininterval=10.0)
+    n_batches = len(loader)
+    log_every = max(1, n_batches // 10)   # ~10 progress prints per epoch
     with ctx:
-        for ids, mask, labels in bar:
+        for i, (ids, mask, labels) in enumerate(loader, start=1):
             ids, mask, labels = ids.to(device), mask.to(device), labels.to(device)
             logits = model(ids, attention_mask=mask)
             loss   = criterion(logits, labels)
@@ -115,7 +116,10 @@ def _run_epoch_clf(model, loader, criterion, optimizer, device, train=True, desc
             total_loss += loss.item() * len(labels)
             correct    += (logits.argmax(1) == labels).sum().item()
             total      += len(labels)
-            bar.set_postfix(loss=f"{total_loss/total:.4f}", acc=f"{correct/total:.4f}")
+            if i % log_every == 0 or i == n_batches:
+                print(f"  {desc} batch {i:>5d}/{n_batches}  "
+                      f"loss={total_loss/total:.4f}  acc={correct/total:.4f}",
+                      flush=True)
     return total_loss / total, correct / total
 
 
@@ -125,9 +129,10 @@ def _run_epoch_reg(model, loader, criterion, optimizer, device, train=True, desc
     model.train() if train else model.eval()
     total_loss, total = 0.0, 0
     ctx = torch.enable_grad() if train else torch.no_grad()
-    bar = tqdm(loader, desc=desc, leave=False, unit="batch", mininterval=10.0)
+    n_batches = len(loader)
+    log_every = max(1, n_batches // 10)
     with ctx:
-        for ids, mask, targets in bar:
+        for i, (ids, mask, targets) in enumerate(loader, start=1):
             ids, mask, targets = ids.to(device), mask.to(device), targets.to(device)
             preds = model(ids, attention_mask=mask).squeeze(-1)
             loss  = criterion(preds, targets)
@@ -138,7 +143,10 @@ def _run_epoch_reg(model, loader, criterion, optimizer, device, train=True, desc
                 optimizer.step()
             total_loss += loss.item() * len(targets)
             total      += len(targets)
-            bar.set_postfix(loss=f"{total_loss/total:.4f}")
+            if i % log_every == 0 or i == n_batches:
+                print(f"  {desc} batch {i:>5d}/{n_batches}  "
+                      f"loss={total_loss/total:.4f}",
+                      flush=True)
     return total_loss / total
 
 
@@ -252,11 +260,12 @@ def main():
 
     if is_regression:
         best_val, best_state = float("inf"), None
-        for epoch in tqdm(range(1, args.epochs + 1), desc="[Transformer] Epochs"):
-            tr_loss = _run_epoch_reg(model, train_loader, crit, opt, device, train=True,  desc=f"  Ep{epoch:02d} train")
-            vl_loss = _run_epoch_reg(model, val_loader,   crit, opt, device, train=False, desc=f"  Ep{epoch:02d} val  ")
+        for epoch in range(1, args.epochs + 1):
+            print(f"\n[Transformer] === Epoch {epoch:02d}/{args.epochs} ===", flush=True)
+            tr_loss = _run_epoch_reg(model, train_loader, crit, opt, device, train=True,  desc=f"Ep{epoch:02d} train")
+            vl_loss = _run_epoch_reg(model, val_loader,   crit, opt, device, train=False, desc=f"Ep{epoch:02d} val  ")
             sched.step()
-            tqdm.write(f"[Transformer] Ep {epoch:02d}  tr_loss={tr_loss:.4f}  val_loss={vl_loss:.4f}")
+            print(f"[Transformer] Ep {epoch:02d}  tr_loss={tr_loss:.4f}  val_loss={vl_loss:.4f}", flush=True)
             if vl_loss < best_val:
                 best_val   = vl_loss
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -266,14 +275,15 @@ def main():
         thresholds = np.array([np.percentile(y_arr, 33), np.percentile(y_arr, 67)])
         os.makedirs(CKPT_DIR, exist_ok=True)
         np.save(os.path.join(CKPT_DIR, f"{ckpt_tag}_thresholds.npy"), thresholds)
-        tqdm.write(f"[Transformer] Thresholds: low<={thresholds[0]:.3f}, high>{thresholds[1]:.3f}")
+        print(f"[Transformer] Thresholds: low<={thresholds[0]:.3f}, high>{thresholds[1]:.3f}", flush=True)
     else:
         best_val, best_state = 0.0, None
-        for epoch in tqdm(range(1, args.epochs + 1), desc="[Transformer] Epochs"):
-            tr_loss, tr_acc = _run_epoch_clf(model, train_loader, crit, opt, device, train=True,  desc=f"  Ep{epoch:02d} train")
-            vl_loss, vl_acc = _run_epoch_clf(model, val_loader,   crit, opt, device, train=False, desc=f"  Ep{epoch:02d} val  ")
+        for epoch in range(1, args.epochs + 1):
+            print(f"\n[Transformer] === Epoch {epoch:02d}/{args.epochs} ===", flush=True)
+            tr_loss, tr_acc = _run_epoch_clf(model, train_loader, crit, opt, device, train=True,  desc=f"Ep{epoch:02d} train")
+            vl_loss, vl_acc = _run_epoch_clf(model, val_loader,   crit, opt, device, train=False, desc=f"Ep{epoch:02d} val  ")
             sched.step()
-            tqdm.write(f"[Transformer] Ep {epoch:02d}  tr_loss={tr_loss:.4f} tr_acc={tr_acc:.4f}  val_loss={vl_loss:.4f} val_acc={vl_acc:.4f}")
+            print(f"[Transformer] Ep {epoch:02d}  tr_loss={tr_loss:.4f} tr_acc={tr_acc:.4f}  val_loss={vl_loss:.4f} val_acc={vl_acc:.4f}", flush=True)
             if vl_acc > best_val:
                 best_val   = vl_acc
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -288,7 +298,7 @@ def main():
         f.write(args.task)
 
     result_str = f"Best val loss: {best_val:.4f}" if is_regression else f"Best val acc: {best_val:.4f}"
-    tqdm.write(f"[Transformer] {result_str}  checkpoint -> checkpoints/{ckpt_tag}.pt")
+    print(f"[Transformer] {result_str}  checkpoint -> checkpoints/{ckpt_tag}.pt", flush=True)
 
 
 if __name__ == "__main__":
