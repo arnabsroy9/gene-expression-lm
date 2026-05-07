@@ -101,7 +101,7 @@ def _run_epoch_clf(model, loader, criterion, optimizer, device, train=True, desc
     model.train() if train else model.eval()
     total_loss, correct, total = 0.0, 0, 0
     ctx = torch.enable_grad() if train else torch.no_grad()
-    bar = tqdm(loader, desc=desc, leave=False, unit="batch")
+    bar = tqdm(loader, desc=desc, leave=False, unit="batch", mininterval=10.0)
     with ctx:
         for ids, mask, labels in bar:
             ids, mask, labels = ids.to(device), mask.to(device), labels.to(device)
@@ -125,7 +125,7 @@ def _run_epoch_reg(model, loader, criterion, optimizer, device, train=True, desc
     model.train() if train else model.eval()
     total_loss, total = 0.0, 0
     ctx = torch.enable_grad() if train else torch.no_grad()
-    bar = tqdm(loader, desc=desc, leave=False, unit="batch")
+    bar = tqdm(loader, desc=desc, leave=False, unit="batch", mininterval=10.0)
     with ctx:
         for ids, mask, targets in bar:
             ids, mask, targets = ids.to(device), mask.to(device), targets.to(device)
