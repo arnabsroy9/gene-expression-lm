@@ -25,10 +25,10 @@ checkpoints/
 # Generated evaluation artifacts
 outputs/
 
-# Large data files — upload to Kaggle as separate Dataset
-data/labeled_genes_tss.csv
-data/tss_sequences.csv
+# Large data files / cached downloads
 data/gtex_median_tpm.gct.gz
+data/*_xpresso.csv
+data/labeled_genes_xpresso.csv
 
 # Logs
 *.log

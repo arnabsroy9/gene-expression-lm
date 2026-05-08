@@ -10,11 +10,11 @@ Improvements applied:
   - Regression mode: predict log-TPM with Huber loss, bin at eval time
 
 Usage:
-    python train.py                                      # original CDS dataset, classification
-    python train.py --data data/labeled_genes_tss.csv   # TSS-centred dataset
+    python train.py                                          # original CDS dataset
+    python train.py --data data/labeled_genes_xpresso.csv    # alternate dataset
     python train.py --task regression
-    python train.py --epochs 30 --batch_size 4          # smaller batch for long TSS sequences
-    python train.py --max_len 2000                      # override auto-computed sequence length
+    python train.py --epochs 30 --batch_size 32
+    python train.py --max_len 2000                           # override auto-computed sequence length
 """
 
 import os

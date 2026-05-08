@@ -7,12 +7,9 @@ Re-running with a different --tissue just re-parses the cached file.
 Usage:
     python data/download_gtex.py                        # default: Liver
     python data/download_gtex.py --tissue "Whole Blood"
-    python data/download_gtex.py --tissue all           # median across all tissues
     python data/download_gtex.py --list_tissues         # show all available tissues
 
-Outputs:
-    data/gtex_expression.csv               (single-tissue mode; gene_id, median_tpm)
-    data/gtex_expression_all_tissues.csv   (--tissue all mode; gene_id, median_tpm)
+Outputs: data/gtex_expression.csv  (gene_id [Ensembl], median_tpm)
 """
 
 import os
@@ -27,10 +24,9 @@ GTEX_URL = (
     "GTEx_Analysis_2017-06-05_v8_RNASeQCv1.1.9_gene_median_tpm.gct.gz"
 )
 
-DEFAULT_TISSUE  = "Liver"
-GCT_GZ_PATH     = os.path.join(os.path.dirname(__file__), "gtex_median_tpm.gct.gz")
-OUT_PATH        = os.path.join(os.path.dirname(__file__), "gtex_expression.csv")
-OUT_PATH_ALL    = os.path.join(os.path.dirname(__file__), "gtex_expression_all_tissues.csv")
+DEFAULT_TISSUE = "Liver"
+GCT_GZ_PATH   = os.path.join(os.path.dirname(__file__), "gtex_median_tpm.gct.gz")
+OUT_PATH       = os.path.join(os.path.dirname(__file__), "gtex_expression.csv")
 
 
 def _download_gct(url: str, dest: str) -> None:
@@ -50,14 +46,6 @@ def _parse_gct(gz_path: str, tissue_col: str) -> pd.DataFrame:
         df = pd.read_csv(fh, sep="\t")
 
     df["gene_id"] = df["Name"].str.split(".").str[0]
-
-    # Special mode: median TPM across ALL tissues (less noisy than single-tissue)
-    if tissue_col == "all":
-        tissue_cols = [c for c in df.columns if c not in ("Name", "Description", "gene_id")]
-        df["median_tpm"] = df[tissue_cols].median(axis=1)
-        result = df[["gene_id", "median_tpm"]].dropna().reset_index(drop=True)
-        print(f"Computed median TPM across {len(tissue_cols)} tissues for {len(result):,} genes")
-        return result
 
     if tissue_col not in df.columns:
         available = [c for c in df.columns if c not in ("Name", "Description", "gene_id")]
@@ -84,9 +72,9 @@ def list_tissues(gz_path: str = GCT_GZ_PATH) -> list:
 
 
 def download(
-    url:        str  = GTEX_URL,
-    tissue_col: str  = DEFAULT_TISSUE,
-    out_path:   str  = None,
+    url:        str = GTEX_URL,
+    tissue_col: str = DEFAULT_TISSUE,
+    out_path:   str = OUT_PATH,
 ) -> pd.DataFrame:
     if not os.path.exists(GCT_GZ_PATH):
         _download_gct(url, GCT_GZ_PATH)
@@ -94,11 +82,6 @@ def download(
         print(f"Using cached GCT.gz: {GCT_GZ_PATH}")
 
     df = _parse_gct(GCT_GZ_PATH, tissue_col)
-
-    # Pick output path automatically based on mode
-    if out_path is None:
-        out_path = OUT_PATH_ALL if tissue_col == "all" else OUT_PATH
-
     df.to_csv(out_path, index=False)
     print(f"Saved -> {out_path}")
     return df
@@ -106,14 +89,12 @@ def download(
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--tissue",       default=DEFAULT_TISSUE,
-                   help='GTEx tissue column name, or "all" for median across tissues')
-    p.add_argument("--out",          default=None, help="Override output CSV path")
-    p.add_argument("--list_tissues", action="store_true", help="Print available tissue names and exit")
+    p.add_argument("--tissue",       default=DEFAULT_TISSUE, help="GTEx tissue column name")
+    p.add_argument("--list_tissues", action="store_true",    help="Print all available tissue names and exit")
     args = p.parse_args()
 
     if args.list_tissues:
         for t in list_tissues():
             print(t)
     else:
-        download(tissue_col=args.tissue, out_path=args.out)
+        download(tissue_col=args.tissue)
