@@ -162,7 +162,18 @@ def _auto_max_len(data_csv: str) -> int:
 def _load_splits(task, data_csv: str):
     df = pd.read_csv(data_csv).dropna(subset=["sequence", "expression_label"])
     df["class_label"] = df["expression_label"].map(LABEL_MAP)
-    df = df.dropna(subset=["class_label"])
+    df = df.dropna(subset=["class_label"]).copy()
+
+    # Auto-detect classes present (binary datasets skip "Medium") and remap
+    # to a contiguous range 0..K-1 so CrossEntropyLoss/num_classes work cleanly.
+    unique_labels = sorted(df["class_label"].astype(int).unique())
+    remap = {old: new for new, old in enumerate(unique_labels)}
+    df["class_label"] = df["class_label"].astype(int).map(remap)
+    num_classes = len(unique_labels)
+
+    inverse = {v: k for k, v in LABEL_MAP.items()}
+    label_names = [inverse[old] for old in unique_labels]
+    print(f"Detected {num_classes}-class problem: {label_names} → {list(range(num_classes))}")
 
     seqs         = df["sequence"].tolist()
     class_labels = df["class_label"].astype(int).tolist()
@@ -181,7 +192,7 @@ def _load_splits(task, data_csv: str):
         X_tv, y_tv, test_size=0.25, stratify=cl_tv, random_state=42)
 
     print(f"Split sizes -- train: {len(X_train)}, val: {len(X_val)}, test: {len(X_test)}")
-    return X_train, X_val, X_test, y_train, y_val, y_test
+    return X_train, X_val, X_test, y_train, y_val, y_test, num_classes
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -223,10 +234,10 @@ def main():
     ckpt_tag  = "transformer" if data_stem == "labeled_genes" else f"transformer_{data_stem}"
 
     tok = KmerTokenizer(k=K, max_len=MAX_LEN)
-    X_train, X_val, X_test, y_train, y_val, y_test = _load_splits(args.task, args.data)
+    X_train, X_val, X_test, y_train, y_val, y_test, detected_classes = _load_splits(args.task, args.data)
 
     is_regression = (args.task == "regression")
-    num_classes   = 1 if is_regression else NUM_CLASSES
+    num_classes   = 1 if is_regression else detected_classes
 
     train_ds = DNADataset(X_train, y_train, tok, add_cls=True, augment=True,  is_float=is_regression)
     val_ds   = DNADataset(X_val,   y_val,   tok, add_cls=True, augment=False, is_float=is_regression)
@@ -249,9 +260,9 @@ def main():
         crit = nn.HuberLoss(delta=1.0)
     else:
         # Class weights from training label distribution
-        counts       = np.bincount(np.array(y_train, dtype=int), minlength=NUM_CLASSES).astype(float)
-        weights      = torch.tensor(1.0 / counts, dtype=torch.float).to(device)
-        weights      = weights / weights.sum() * NUM_CLASSES
+        counts  = np.bincount(np.array(y_train, dtype=int), minlength=num_classes).astype(float)
+        weights = torch.tensor(1.0 / counts, dtype=torch.float).to(device)
+        weights = weights / weights.sum() * num_classes
         crit = nn.CrossEntropyLoss(weight=weights, label_smoothing=0.1)
 
     if is_regression:
