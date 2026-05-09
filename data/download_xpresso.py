@@ -21,7 +21,9 @@ For binary classification, run `train.py` on the output normally — the rank-pe
 binning produces 3 classes by default; pass `--data` and the standard split kicks in.
 
 Usage:
-    python data/download_xpresso.py
+    python data/download_xpresso.py                     # full 20 kb sequences
+    python data/download_xpresso.py --crop 4000         # centre-crop to 4 kb (recommended)
+    python data/download_xpresso.py --crop 8000         # centre-crop to 8 kb
     python data/download_xpresso.py --out data/my_xpresso.csv
 """
 
@@ -65,8 +67,19 @@ def _download_file(url: str, dest: str) -> None:
     print(f"    saved -> {dest}")
 
 
-def _onehot_batch_to_seqs(arr: np.ndarray) -> list:
-    """Decode (N, L, 4) one-hot array to a list of N ACGT strings."""
+def _onehot_batch_to_seqs(arr: np.ndarray, crop: int = 0) -> list:
+    """Decode (N, L, 4) one-hot array to a list of N ACGT strings.
+
+    If crop > 0, take only the central `crop` positions of each sequence
+    (Xpresso sequences are TSS-centred, so the centre = the TSS).
+    """
+    if crop and crop < arr.shape[1]:
+        L     = arr.shape[1]
+        start = (L - crop) // 2
+        end   = start + crop
+        arr   = arr[:, start:end, :]
+        print(f"    cropped to centre {crop} bp (positions {start}..{end} of {L})")
+
     bases   = np.array(['A', 'C', 'G', 'T'], dtype='U1')
     indices = arr.argmax(axis=-1)             # (N, L)
     is_zero = arr.sum(axis=-1) == 0           # (N, L)
@@ -109,7 +122,7 @@ def _pick_sequence_key(f, keys: list) -> str:
     return candidates[0][0]
 
 
-def _load_h5_split(path: str) -> pd.DataFrame:
+def _load_h5_split(path: str, crop: int = 0) -> pd.DataFrame:
     """Parse an Xpresso HDF5 file. Schema is auto-detected from keys + shapes."""
     import h5py
 
@@ -140,7 +153,7 @@ def _load_h5_split(path: str) -> pd.DataFrame:
         seqs_oh = seqs_oh.transpose(0, 2, 1)
 
     print(f"    decoding {len(seqs_oh):,} sequences of shape {seqs_oh.shape[1:]}")
-    sequences = _onehot_batch_to_seqs(seqs_oh)
+    sequences = _onehot_batch_to_seqs(seqs_oh, crop=crop)
 
     # Decode HDF5 bytes -> str if necessary
     if raw_names.dtype.kind in ('S', 'O'):
@@ -171,8 +184,10 @@ def _bin_labels(values: pd.Series) -> pd.Series:
     return out
 
 
-def download(out_path: str = OUT_PATH) -> pd.DataFrame:
+def download(out_path: str = OUT_PATH, crop: int = 0) -> pd.DataFrame:
     print("=== Xpresso dataset download ===\n")
+    if crop:
+        print(f"Centre-cropping each 20,000 bp sequence to {crop} bp around TSS\n")
 
     print("Step 1/3: Downloading HDF5 files ...")
     h5_paths = {}
@@ -185,7 +200,7 @@ def download(out_path: str = OUT_PATH) -> pd.DataFrame:
     frames = []
     for split in SPLITS:
         print(f"  -> {split}.h5")
-        df = _load_h5_split(h5_paths[split])
+        df = _load_h5_split(h5_paths[split], crop=crop)
         df["xpresso_split"] = split
         frames.append(df)
         print(f"     {len(df):,} genes")
@@ -222,6 +237,9 @@ def download(out_path: str = OUT_PATH) -> pd.DataFrame:
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--out", default=OUT_PATH, help="Output CSV path")
+    p.add_argument("--out",  default=OUT_PATH, help="Output CSV path")
+    p.add_argument("--crop", type=int, default=0,
+                   help="Centre-crop each sequence to this many bp around TSS "
+                        "(0 = keep full 20,000 bp). Recommended: 4000 for fast training.")
     args = p.parse_args()
-    download(out_path=args.out)
+    download(out_path=args.out, crop=args.crop)
