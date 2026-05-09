@@ -43,6 +43,15 @@ DIM_FF     = 256
 # Memory budget: attention is O(L²); warn when batch×L² exceeds this threshold
 _ATTN_WARN_TOKENS = 2_000
 
+# Auxiliary tasks for multi-task learning. Auto-enabled if the data CSV
+# contains all of these columns (added by data/compute_aux_labels.py).
+# Each entry: (column_name, "binary" | "regression", loss_weight).
+AUX_TASKS = [
+    ("cpg_island", "binary",     0.1),
+    ("tata_box",   "binary",     0.1),
+    ("gc_content", "regression", 0.1),
+]
+
 RC_TABLE = str.maketrans("ACGT", "TGCA")
 
 
@@ -53,13 +62,16 @@ def reverse_complement(seq: str) -> str:
 # ── Dataset ────────────────────────────────────────────────────────────────────
 
 class DNADataset:
-    def __init__(self, seqs, labels, tokenizer, add_cls=True, augment=False, is_float=False):
-        self.seqs     = seqs
-        self.labels   = labels
-        self.tok      = tokenizer
-        self.add_cls  = add_cls
-        self.augment  = augment
-        self.is_float = is_float
+    def __init__(self, seqs, labels, tokenizer, add_cls=True, augment=False,
+                 is_float=False, aux_labels=None):
+        self.seqs       = seqs
+        self.labels     = labels
+        self.tok        = tokenizer
+        self.add_cls    = add_cls
+        self.augment    = augment
+        self.is_float   = is_float
+        # aux_labels: dict of {task_name: list/array of floats}, length matches seqs
+        self.aux_labels = aux_labels
 
     def __len__(self):
         return len(self.seqs)
@@ -73,7 +85,14 @@ class DNADataset:
         mask = (ids != 0).long()
         dtype = torch.float if self.is_float else torch.long
         lbl  = torch.tensor(self.labels[idx], dtype=dtype)
-        return ids, mask, lbl
+        if self.aux_labels is None:
+            return ids, mask, lbl
+        # Aux labels packed as a flat float tensor in AUX_TASKS order
+        aux = torch.tensor(
+            [self.aux_labels[name][idx] for name, _, _ in AUX_TASKS],
+            dtype=torch.float,
+        )
+        return ids, mask, lbl, aux
 
 
 def make_loader(dataset, batch_size, shuffle):
@@ -94,6 +113,69 @@ def make_scheduler(optimizer, warmup_epochs, total_epochs):
 
 
 # ── Training loops ─────────────────────────────────────────────────────────────
+
+def _model_forward_multi(model, ids, mask):
+    """Call forward_multi(); handles DataParallel transparently."""
+    import torch.nn as nn
+    if isinstance(model, nn.DataParallel):
+        return model.module.forward_multi(ids, attention_mask=mask)
+    return model.forward_multi(ids, attention_mask=mask)
+
+
+def _run_epoch_multitask(model, loader, criterion, optimizer, device, train=True, desc=""):
+    """Multi-task training/eval. Primary cross-entropy + weighted aux losses."""
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    model.train() if train else model.eval()
+    total_loss, correct, total = 0.0, 0, 0
+    aux_running = {name: 0.0 for name, _, _ in AUX_TASKS}
+    ctx = torch.enable_grad() if train else torch.no_grad()
+    n_batches = len(loader)
+    log_every = max(1, n_batches // 10)
+
+    with ctx:
+        for i, (ids, mask, labels, aux) in enumerate(loader, start=1):
+            ids, mask, labels, aux = (
+                ids.to(device), mask.to(device), labels.to(device), aux.to(device))
+            out = _model_forward_multi(model, ids, mask)
+
+            main_loss = criterion(out["main"], labels)
+            aux_loss  = 0.0
+            for j, (name, kind, weight) in enumerate(AUX_TASKS):
+                target = aux[:, j]
+                pred   = out[name]
+                if kind == "binary":
+                    li = F.binary_cross_entropy_with_logits(pred, target)
+                else:   # regression
+                    li = F.mse_loss(pred, target)
+                aux_running[name] += li.item() * len(labels)
+                aux_loss = aux_loss + weight * li
+            loss = main_loss + aux_loss
+
+            if train:
+                optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+
+            total_loss += loss.item() * len(labels)
+            correct    += (out["main"].argmax(1) == labels).sum().item()
+            total      += len(labels)
+
+            if i % log_every == 0 or i == n_batches:
+                aux_str = "  ".join(
+                    f"{n}={aux_running[n]/total:.3f}" for n, _, _ in AUX_TASKS)
+                print(f"  {desc} batch {i:>5d}/{n_batches}  "
+                      f"loss={total_loss/total:.4f}  acc={correct/total:.4f}  "
+                      f"[{aux_str}]",
+                      flush=True)
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return total_loss / total, correct / total
+
 
 def _run_epoch_clf(model, loader, criterion, optimizer, device, train=True, desc=""):
     import torch
@@ -180,14 +262,29 @@ def _load_splits(task, data_csv: str):
     label_names = [inverse[old] for old in unique_labels]
     print(f"Detected {num_classes}-class problem: {label_names} → {list(range(num_classes))}")
 
+    # Auto-detect auxiliary task columns added by data/compute_aux_labels.py
+    aux_cols = [name for name, _, _ in AUX_TASKS if name in df.columns]
+    has_all_aux = (len(aux_cols) == len(AUX_TASKS))
+    if has_all_aux:
+        df = df.dropna(subset=aux_cols).copy()
+        print(f"Multi-task mode active. Aux tasks: {[n for n,_,_ in AUX_TASKS]}")
+    elif aux_cols:
+        print(f"WARNING: partial aux columns found ({aux_cols}); need all of "
+              f"{[n for n,_,_ in AUX_TASKS]} for multi-task. Falling back to single-task.")
+        has_all_aux = False
+
     seqs         = df["sequence"].tolist()
     class_labels = df["class_label"].astype(int).tolist()
 
     if task == "regression":
-        df = df.dropna(subset=["log_tpm"])
-        targets = df["log_tpm"].astype(float).tolist()
+        df_reg = df.dropna(subset=["log_tpm"])
+        targets = df_reg["log_tpm"].astype(float).tolist()
     else:
         targets = class_labels
+
+    aux_arrays = None
+    if has_all_aux:
+        aux_arrays = {name: df[name].astype(float).tolist() for name, _, _ in AUX_TASKS}
 
     X_tv, X_test, y_tv, y_test = train_test_split(
         seqs, targets, test_size=0.20, stratify=class_labels, random_state=42)
@@ -196,8 +293,23 @@ def _load_splits(task, data_csv: str):
     X_train, X_val, y_train, y_val = train_test_split(
         X_tv, y_tv, test_size=0.25, stratify=cl_tv, random_state=42)
 
+    aux_train = aux_val = aux_test = None
+    if has_all_aux:
+        # Re-split aux labels with the same random_state so indices align
+        idx_all = list(range(len(seqs)))
+        idx_tv, idx_test = train_test_split(
+            idx_all, test_size=0.20, stratify=class_labels, random_state=42)
+        idx_train, idx_val = train_test_split(
+            idx_tv, test_size=0.25, stratify=[class_labels[i] for i in idx_tv], random_state=42)
+        def _slice(d, idxs):
+            return {k: [v[i] for i in idxs] for k, v in d.items()}
+        aux_train = _slice(aux_arrays, idx_train)
+        aux_val   = _slice(aux_arrays, idx_val)
+        aux_test  = _slice(aux_arrays, idx_test)
+
     print(f"Split sizes -- train: {len(X_train)}, val: {len(X_val)}, test: {len(X_test)}")
-    return X_train, X_val, X_test, y_train, y_val, y_test, num_classes
+    return (X_train, X_val, X_test, y_train, y_val, y_test, num_classes,
+            aux_train, aux_val, aux_test, has_all_aux)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -239,23 +351,34 @@ def main():
     ckpt_tag  = "transformer" if data_stem == "labeled_genes" else f"transformer_{data_stem}"
 
     tok = KmerTokenizer(k=K, max_len=MAX_LEN)
-    X_train, X_val, X_test, y_train, y_val, y_test, detected_classes = _load_splits(args.task, args.data)
+    (X_train, X_val, X_test, y_train, y_val, y_test, detected_classes,
+     aux_train, aux_val, aux_test, multitask) = _load_splits(args.task, args.data)
 
     is_regression = (args.task == "regression")
     num_classes   = 1 if is_regression else detected_classes
 
-    train_ds = DNADataset(X_train, y_train, tok, add_cls=True, augment=True,  is_float=is_regression)
-    val_ds   = DNADataset(X_val,   y_val,   tok, add_cls=True, augment=False, is_float=is_regression)
+    if multitask and is_regression:
+        print("WARNING: multi-task currently supports classification only. "
+              "Disabling aux heads for regression task.")
+        multitask = False
+        aux_train = aux_val = aux_test = None
+
+    train_ds = DNADataset(X_train, y_train, tok, add_cls=True, augment=True,
+                          is_float=is_regression, aux_labels=aux_train)
+    val_ds   = DNADataset(X_val,   y_val,   tok, add_cls=True, augment=False,
+                          is_float=is_regression, aux_labels=aux_val)
 
     train_loader = make_loader(train_ds, args.batch_size, shuffle=True)
     val_loader   = make_loader(val_ds,   args.batch_size, shuffle=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    aux_specs = [(name, kind) for name, kind, _ in AUX_TASKS] if multitask else None
     model  = TransformerClassifier(
         vocab_size=tok.vocab_size, pad_idx=tok.pad_id,
         max_len=MAX_LEN + 1,   # +1 for the CLS token
         num_classes=num_classes,
         d_model=D_MODEL, nhead=NHEAD, num_layers=NUM_LAYERS, dim_ff=DIM_FF,
+        aux_specs=aux_specs,
     ).to(device)
 
     # Wrap in DataParallel when multiple GPUs are available — splits the batch
@@ -303,11 +426,18 @@ def main():
         np.save(os.path.join(CKPT_DIR, f"{ckpt_tag}_thresholds.npy"), thresholds)
         print(f"[Transformer] Thresholds: low<={thresholds[0]:.3f}, high>{thresholds[1]:.3f}", flush=True)
     else:
+        # Pick the right epoch runner: multi-task uses forward_multi + aux losses,
+        # single-task uses the standard cross-entropy-only path.
+        epoch_fn = _run_epoch_multitask if multitask else _run_epoch_clf
+        if multitask:
+            print(f"[Transformer] Multi-task heads: "
+                  f"{[(n, k, w) for n, k, w in AUX_TASKS]}")
+
         best_val, best_state = 0.0, None
         for epoch in range(1, args.epochs + 1):
             print(f"\n[Transformer] === Epoch {epoch:02d}/{args.epochs} ===", flush=True)
-            tr_loss, tr_acc = _run_epoch_clf(model, train_loader, crit, opt, device, train=True,  desc=f"Ep{epoch:02d} train")
-            vl_loss, vl_acc = _run_epoch_clf(model, val_loader,   crit, opt, device, train=False, desc=f"Ep{epoch:02d} val  ")
+            tr_loss, tr_acc = epoch_fn(model, train_loader, crit, opt, device, train=True,  desc=f"Ep{epoch:02d} train")
+            vl_loss, vl_acc = epoch_fn(model, val_loader,   crit, opt, device, train=False, desc=f"Ep{epoch:02d} val  ")
             sched.step()
             print(f"[Transformer] Ep {epoch:02d}  tr_loss={tr_loss:.4f} tr_acc={tr_acc:.4f}  val_loss={vl_loss:.4f} val_acc={vl_acc:.4f}", flush=True)
             if vl_acc > best_val:
