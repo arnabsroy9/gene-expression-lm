@@ -120,6 +120,9 @@ def _run_epoch_clf(model, loader, criterion, optimizer, device, train=True, desc
                 print(f"  {desc} batch {i:>5d}/{n_batches}  "
                       f"loss={total_loss/total:.4f}  acc={correct/total:.4f}",
                       flush=True)
+    # Free cached activations / fragmented memory before the next pass
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     return total_loss / total, correct / total
 
 
@@ -147,6 +150,8 @@ def _run_epoch_reg(model, loader, criterion, optimizer, device, train=True, desc
                 print(f"  {desc} batch {i:>5d}/{n_batches}  "
                       f"loss={total_loss/total:.4f}",
                       flush=True)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     return total_loss / total
 
 
@@ -253,6 +258,13 @@ def main():
         d_model=D_MODEL, nhead=NHEAD, num_layers=NUM_LAYERS, dim_ff=DIM_FF,
     ).to(device)
 
+    # Wrap in DataParallel when multiple GPUs are available — splits the batch
+    # across GPUs so per-GPU memory pressure halves (or batch size can double).
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs via DataParallel "
+              f"(per-GPU batch size = {args.batch_size // torch.cuda.device_count()})")
+        model = nn.DataParallel(model)
+
     opt   = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = make_scheduler(opt, warmup_epochs=WARMUP_EPOCHS, total_epochs=args.epochs)
 
@@ -279,7 +291,10 @@ def main():
             print(f"[Transformer] Ep {epoch:02d}  tr_loss={tr_loss:.4f}  val_loss={vl_loss:.4f}", flush=True)
             if vl_loss < best_val:
                 best_val   = vl_loss
-                best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                # Unwrap DataParallel (strip "module." prefix) so evaluate.py / app.py
+                # can load the checkpoint without needing DataParallel themselves.
+                _src_model = model.module if isinstance(model, nn.DataParallel) else model
+                best_state = {k: v.cpu().clone() for k, v in _src_model.state_dict().items()}
 
         # Compute and save binning thresholds from training targets
         y_arr = np.array(y_train, dtype=float)
@@ -297,7 +312,10 @@ def main():
             print(f"[Transformer] Ep {epoch:02d}  tr_loss={tr_loss:.4f} tr_acc={tr_acc:.4f}  val_loss={vl_loss:.4f} val_acc={vl_acc:.4f}", flush=True)
             if vl_acc > best_val:
                 best_val   = vl_acc
-                best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                # Unwrap DataParallel (strip "module." prefix) so evaluate.py / app.py
+                # can load the checkpoint without needing DataParallel themselves.
+                _src_model = model.module if isinstance(model, nn.DataParallel) else model
+                best_state = {k: v.cpu().clone() for k, v in _src_model.state_dict().items()}
 
     os.makedirs(CKPT_DIR, exist_ok=True)
     torch.save(best_state, os.path.join(CKPT_DIR, f"{ckpt_tag}.pt"))
