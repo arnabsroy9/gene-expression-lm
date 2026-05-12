@@ -118,8 +118,8 @@ python web/main.py
 python evaluate.py
 
 # Generate attention & saliency visualisations for example genes
-python interpret.py --gene BRCA1
-python interpret.py --gene TP53
+python interpret.py --gene IFNB1     # interferon-β (Low expression)
+python interpret.py --gene HBA1      # hemoglobin α-1 (High expression in blood)
 python interpret.py --n_examples 3   # random test-set samples
 ```
 
@@ -221,7 +221,9 @@ Both visualisations are exported as PNG heatmaps annotated with the underlying 6
 ![Attention rollout heatmap](assets/interpretability_brca1.png)
 
 ```bash
-python interpret.py --gene BRCA1
+python interpret.py --gene IFNB1           # Low expression — interferon-β
+python interpret.py --gene CCDC182         # Medium expression
+python interpret.py --gene HBA1            # High expression — hemoglobin α-1
 python interpret.py --sequence ATCG...     # custom DNA string
 python interpret.py --n_examples 5         # five random test-set samples
 ```
@@ -233,7 +235,7 @@ python interpret.py --n_examples 5         # five random test-set samples
 Launched via `python web/main.py` (or `launch.bat` on Windows). Serves at **http://127.0.0.1:8000**.
 
 **Frontend** — a static HTML / CSS / JS UI in `web/static/`:
-- Paste a DNA sequence (or pick a pre-loaded example: **BRCA1**, **TP53**, **ACTB**)
+- Paste a DNA sequence (or pick a pre-loaded example: **IFNB1** [Low], **CCDC182** [Medium], **HBA1** [High])
 - View prediction, class-probability bars, attention-rollout heatmap, and saliency heatmap
 
 **REST API endpoints:**

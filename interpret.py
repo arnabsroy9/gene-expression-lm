@@ -2,10 +2,14 @@
 Attention rollout + input-gradient saliency visualisation for the Transformer.
 
 Usage:
-    python interpret.py                    # 3 random examples
-    python interpret.py --gene BRCA1
-    python interpret.py --sequence ATCG...
+    python interpret.py                       # 3 random examples
+    python interpret.py --gene IFNB1          # Low-expression example
+    python interpret.py --gene CCDC182        # Medium-expression example
+    python interpret.py --gene HBA1           # High-expression example
+    python interpret.py --sequence ATCG...    # custom DNA string
     python interpret.py --n_examples 5
+
+Gene symbols must exist in data/labeled_genes.csv (source = NCBI / GenerativeLM-Genes).
 """
 
 import os
