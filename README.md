@@ -10,16 +10,16 @@ A deep-learning system that predicts gene expression level (**Low / Medium / Hig
 
 - **Custom encoder-only Transformer** with 6-mer k-mer tokenization
 - **End-to-end data pipeline** combining NCBI gene sequences with GTEx tissue expression
-- **Two user interfaces** — a Gradio web app and a FastAPI REST backend with static frontend
+- **FastAPI web app** with HTML/CSS/JS frontend and JSON REST API
 - **Interpretability tools** — attention rollout (Abnar & Zuidema, 2020) and input-gradient saliency
 - **12,052 labelled human genes**, three balanced classes
 - Final test accuracy **63.4 %**, macro-F1 **0.634**, AUROC **0.806**
 
 ## Demo
 
-![Gradio web interface](assets/gradio_demo.png)
+![Web interface](assets/webapp_demo.png)
 
-> Interactive prediction with attention-rollout and saliency heatmaps
+> Interactive prediction served by FastAPI, with attention-rollout and saliency heatmaps
 
 ---
 
@@ -42,12 +42,11 @@ Confusion matrix and per-class metrics are saved to `outputs/` after running `py
 
 ```
 gene-expression-lm/
-├── app.py                       # Gradio web interface (entry point)
 ├── train.py                     # Training script
 ├── evaluate.py                  # Test-set evaluation & metrics
 ├── interpret.py                 # Attention / saliency visualisations
 ├── run_pipeline.py              # One-shot data-pipeline orchestrator
-├── launch.bat                   # Windows launcher for the Gradio app
+├── launch.bat                   # Windows launcher (opens browser + starts FastAPI)
 ├── requirements.txt
 │
 ├── data/                        # Data acquisition and processing
@@ -109,13 +108,11 @@ GPU is optional. Training without a GPU is slow (~10 min/epoch on a modern lapto
 The repository ships with a pre-trained checkpoint, so you can skip directly to evaluation or the demo:
 
 ```bash
-# Launch the interactive Gradio web app
-python app.py
-# → http://127.0.0.1:7860
-
-# Or launch the FastAPI backend (uvicorn auto-reload)
+# Launch the web app (FastAPI + static frontend)
 python web/main.py
 # → http://127.0.0.1:8000
+
+# Or on Windows, double-click launch.bat to open the browser and start the server.
 
 # Evaluate the trained checkpoint on the held-out test set
 python evaluate.py
@@ -231,18 +228,21 @@ python interpret.py --n_examples 5         # five random test-set samples
 
 ---
 
-## Web Interfaces
+## Web Application
 
-### Gradio app (`python app.py`)
+Launched via `python web/main.py` (or `launch.bat` on Windows). Serves at **http://127.0.0.1:8000**.
 
+**Frontend** — a static HTML / CSS / JS UI in `web/static/`:
 - Paste a DNA sequence (or pick a pre-loaded example: **BRCA1**, **TP53**, **ACTB**)
-- Returns: predicted class, class-probability bar chart, attention-rollout heatmap, saliency heatmap
+- View prediction, class-probability bars, attention-rollout heatmap, and saliency heatmap
 
-### FastAPI backend (`python web/main.py`)
+**REST API endpoints:**
 
-- `POST /predict` — JSON `{ "sequence": "ATCG..." }` → prediction + interpretability data
-- `GET /health` — model-status check
-- `GET /` — serves the static HTML/CSS/JS frontend in `web/static/`
+| Method | Endpoint    | Description |
+|--------|-------------|-------------|
+| `GET`  | `/`         | Serves the static frontend |
+| `POST` | `/predict`  | Accepts `{"sequence": "ATCG..."}` → returns prediction + interpretability data |
+| `GET`  | `/health`   | Model-status health check |
 
 ---
 
@@ -256,7 +256,7 @@ Core libraries (see `requirements.txt` for exact versions):
 | Data / biology| `pandas`, `numpy`, `biopython`, `mygene`, `requests` |
 | ML baselines  | `scikit-learn` |
 | Visualisation | `matplotlib`, `seaborn` |
-| Web UI        | `gradio`, `fastapi`, `uvicorn` |
+| Web UI        | `fastapi`, `uvicorn` |
 | Utilities     | `tqdm`, `scipy` |
 
 ---
