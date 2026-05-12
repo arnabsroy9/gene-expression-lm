@@ -27,8 +27,6 @@ outputs/
 
 # Large data files / cached downloads
 data/gtex_median_tpm.gct.gz
-data/xpresso_*.h5
-data/labeled_genes_xpresso.csv
 
 # Logs
 *.log

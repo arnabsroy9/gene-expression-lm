@@ -45,7 +45,6 @@ class TransformerClassifier(nn.Module):
         max_len:     int   = 5_000,
         dropout:     float = 0.1,
         pad_idx:     int   = 0,
-        aux_specs:   list  = None,    # list of (name, "binary" | "regression") tuples
     ):
         super().__init__()
         self.pad_idx    = pad_idx
@@ -66,34 +65,15 @@ class TransformerClassifier(nn.Module):
         self.dropout    = nn.Dropout(dropout)
         self.classifier = nn.Linear(d_model, num_classes)
 
-        # Optional auxiliary task heads (multi-task learning).
-        # Each head reads the same CLS representation and outputs a single scalar.
-        # Binary tasks → BCE-with-logits at training time; regression → MSE.
-        self.aux_specs = list(aux_specs) if aux_specs else []
-        self.aux_heads = nn.ModuleDict({
-            name: nn.Linear(d_model, 1) for name, _ in self.aux_specs
-        })
-
-    def _encode_cls(self, input_ids, attention_mask=None):
-        """Run encoder, return the CLS-token representation (B, d_model)."""
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor = None):
         src_key_padding_mask = None
         if attention_mask is not None:
             src_key_padding_mask = (attention_mask == 0)
-        emb = self.pos_enc(self.embedding(input_ids))
-        out = self.encoder(emb, src_key_padding_mask=src_key_padding_mask)
-        return self.norm(out[:, 0, :])
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor = None):
-        cls_repr = self._encode_cls(input_ids, attention_mask)
+        emb      = self.pos_enc(self.embedding(input_ids))
+        out      = self.encoder(emb, src_key_padding_mask=src_key_padding_mask)
+        cls_repr = self.norm(out[:, 0, :])
         return self.classifier(self.dropout(cls_repr))
-
-    def forward_multi(self, input_ids: torch.Tensor, attention_mask: torch.Tensor = None):
-        """Multi-task forward: returns dict with main logits + each aux head's output."""
-        cls_repr = self._encode_cls(input_ids, attention_mask)
-        out = {"main": self.classifier(self.dropout(cls_repr))}
-        for name, head in self.aux_heads.items():
-            out[name] = head(cls_repr).squeeze(-1)   # (B,)
-        return out
 
     # ── Interpretability ────────────────────────────────────────────────────────
 
