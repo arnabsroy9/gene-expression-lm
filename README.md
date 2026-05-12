@@ -15,6 +15,12 @@ A deep-learning system that predicts gene expression level (**Low / Medium / Hig
 - **12,052 labelled human genes**, three balanced classes
 - Final test accuracy **63.4 %**, macro-F1 **0.634**, AUROC **0.806**
 
+## Demo
+
+![Gradio web interface](assets/gradio_demo.png)
+
+> Interactive prediction with attention-rollout and saliency heatmaps
+
 ---
 
 ## Results
@@ -25,6 +31,8 @@ A deep-learning system that predicts gene expression level (**Low / Medium / Hig
 | Macro F1          | **0.634** |
 | AUROC (one-vs-rest) | **0.806** |
 | Test set size     | 2,411 genes |
+
+![Confusion matrix](outputs/confusion_transformer.png)
 
 Confusion matrix and per-class metrics are saved to `outputs/` after running `python evaluate.py`.
 
@@ -212,6 +220,8 @@ For the regression head, cross-entropy is replaced by Huber loss; binning thresh
 2. **Input × gradient saliency** — gradient of the predicted class score with respect to the embedded input.
 
 Both visualisations are exported as PNG heatmaps annotated with the underlying 6-mer at every position.
+
+![Attention rollout heatmap](assets/interpretability_brca1.png)
 
 ```bash
 python interpret.py --gene BRCA1
