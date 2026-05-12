@@ -32,7 +32,7 @@ A deep-learning system that predicts gene expression level (**Low / Medium / Hig
 | AUROC (one-vs-rest) | **0.806** |
 | Test set size     | 2,411 genes |
 
-![Confusion matrix](outputs/confusion_transformer.png)
+![Confusion matrix](assets/confusion_transformer.png)
 
 Confusion matrix and per-class metrics are saved to `outputs/` after running `python evaluate.py`.
 
