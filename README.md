@@ -218,7 +218,7 @@ For the regression head, cross-entropy is replaced by Huber loss; binning thresh
 
 Both visualisations are exported as PNG heatmaps annotated with the underlying 6-mer at every position.
 
-![Attention rollout heatmap](assets/interpretability_brca1.png)
+![Attention rollout heatmap](assets/interpretability_hba1.png)
 
 ```bash
 python interpret.py --gene IFNB1           # Low expression — interferon-β
