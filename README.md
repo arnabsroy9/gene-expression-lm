@@ -153,7 +153,7 @@ python train.py --max_len 2000                     # override sequence-length ca
 
 The pipeline produces `data/labeled_genes.csv` from public sources:
 
-1. **NCBI gene sequences** — human protein-coding sequences (filtered to ACGT only, ≤ 1,000 bp) via the [GenerativeLM-Genes](https://github.com/boun-tabi/GenerativeLM-Genes) dataset.
+1. **NCBI human gene sequences** — human gene nucleotide sequences from the NCBI Gene database, filtered to valid ACGT-only sequences of ≤ 1,000 bp.
 2. **GTEx v8 median TPM** — tissue-specific expression values (default tissue: Liver; configurable with `--tissue`).
 3. **Ensembl ↔ HGNC mapping** — gene-symbol harmonisation via the [MyGene.info](https://mygene.info/) REST API.
 4. **Joining & labelling** — log-transform expression, rank-percentile binning into three balanced classes (Low / Medium / High at the 33rd and 67th percentiles).

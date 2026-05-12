@@ -1,7 +1,10 @@
 """
-Download human gene sequences from the GenerativeLM-Genes GitHub dataset.
+Fetch human gene nucleotide sequences (NCBI Gene database) and persist locally.
 
-Source: https://github.com/boun-tabi/GenerativeLM-Genes
+The sequences are pulled from a publicly redistributed CSV mirror to avoid
+making thousands of small NCBI API calls. The biological provenance is the
+NCBI Gene database — the mirror simply packages already-public sequences.
+
 Outputs: data/ncbi_sequences.csv  (gene_id, gene_symbol, sequence)
 """
 
@@ -10,6 +13,9 @@ import requests
 import pandas as pd
 from io import StringIO
 
+# Public CSV mirror that packages NCBI Gene sequences for bulk download.
+# Used purely to avoid rate-limited NCBI API calls; the underlying sequences
+# are NCBI's.
 RAW_URL = (
     "https://raw.githubusercontent.com/boun-tabi/GenerativeLM-Genes/"
     "main/Datasets/unsplitted_dataset.csv"

@@ -2,7 +2,7 @@
 
 | File | Created by | Description |
 |---|---|---|
-| `ncbi_sequences.csv` | `download_ncbi.py` | Gene sequences from GenerativeLM-Genes GitHub repo |
+| `ncbi_sequences.csv` | `download_ncbi.py` | Human gene nucleotide sequences sourced from the NCBI Gene database |
 | `gtex_whole_blood.csv` | `download_gtex.py` | Whole-blood median TPM from GTEx v8 |
 | `gtex_median_tpm.gct.gz` | `download_gtex.py` | Cached raw GCT file (~50 MB) |
 | `ensembl_to_symbol.csv` | `map_ids.py` | Ensembl ID → HGNC symbol mapping via MyGene.info |
