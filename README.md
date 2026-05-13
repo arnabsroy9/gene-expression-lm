@@ -265,7 +265,7 @@ Core libraries (see `requirements.txt` for exact versions):
 
 ## License & Citation
 
-This project was developed as part of an MSc thesis at AIUB. The Transformer architecture is original to this project; data sources (NCBI, GTEx, MyGene.info, Ensembl) are public and used in accordance with their respective terms.
+This project was developed as part of an MSc project at AIUB. The Transformer architecture is original to this project; data sources (NCBI, GTEx, MyGene.info, Ensembl) are public and used in accordance with their respective terms.
 
 ---
 
